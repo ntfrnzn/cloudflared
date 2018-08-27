@@ -54,6 +54,7 @@ type TunnelConfig struct {
 	HTTPTransport      http.RoundTripper
 	Metrics            *TunnelMetrics
 	MetricsUpdateFreq  time.Duration
+	MetricsLabelValues []string
 	ProtocolLogger     *log.Logger
 	Logger             *log.Logger
 	IsAutoupdated      bool

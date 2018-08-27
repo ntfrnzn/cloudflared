@@ -1,6 +1,7 @@
 package origin
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -75,6 +76,14 @@ func defaultMetricsLabelConfig() metricsLabelConfig {
 	}
 }
 
+func (config *metricsLabelConfig) setLabelValues(values []string) error {
+	if len(values) != len(config.extendedKeys) {
+		return errors.New("new set of label values doesn't match number of keys")
+	}
+	config.extendedValues = values
+	return nil
+}
+
 func (config *metricsLabelConfig) getConnectionKeys() []string {
 	return append([]string{config.connectionKey}, config.extendedKeys...)
 }
@@ -85,14 +94,14 @@ func (config *metricsLabelConfig) getLocationKeys() []string {
 	return append([]string{config.connectionKey, config.locationKey}, config.extendedKeys...)
 }
 
-func (config *metricsLabelConfig) getConnectionValues(connectionId string) []string {
-	return append([]string{connectionId}, config.extendedValues...)
+func (config *metricsLabelConfig) getConnectionValues(connectionID string) []string {
+	return append([]string{connectionID}, config.extendedValues...)
 }
-func (config *metricsLabelConfig) getStatusValues(connectionId, status string) []string {
-	return append([]string{connectionId, status}, config.extendedValues...)
+func (config *metricsLabelConfig) getStatusValues(connectionID, status string) []string {
+	return append([]string{connectionID, status}, config.extendedValues...)
 }
-func (config *metricsLabelConfig) getLocationValues(connectionId, location string) []string {
-	return append([]string{connectionId, location}, config.extendedValues...)
+func (config *metricsLabelConfig) getLocationValues(connectionID, location string) []string {
+	return append([]string{connectionID, location}, config.extendedValues...)
 }
 
 func newMetricsLabelConfig(extendedLabels map[string]string) metricsLabelConfig {
@@ -412,6 +421,21 @@ func NewTunnelMetricsFromConfig(config metricsLabelConfig) *TunnelMetrics {
 		muxerMetrics:                   newMuxerMetrics(&config),
 		labelConfig:                    config,
 	}
+}
+
+// TunnelMetricsUpdater can update the set of tunnel metrics
+type TunnelMetricsUpdater interface {
+	incrementHaConnections()
+	decrementHaConnections()
+	updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics)
+	incrementRequests(connectionID string)
+	decrementConcurrentRequests(connectionID string)
+	incrementResponses(connectionID, code string)
+	registerServerLocation(connectionID, loc string)
+}
+
+func (t *TunnelMetrics) setLabelValues(labelValues []string) error {
+	return t.labelConfig.setLabelValues(labelValues)
 }
 
 // XXX must add labels
