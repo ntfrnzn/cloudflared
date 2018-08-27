@@ -51,16 +51,66 @@ type TunnelMetrics struct {
 	// oldServerLocations stores the last server the tunnel was connected to
 	oldServerLocations map[string]string
 
+	// labelConfig stores the set of extended key/value labels
+	labelConfig metricsLabelConfig
+
 	muxerMetrics *muxerMetrics
 }
 
-func newMuxerMetrics() *muxerMetrics {
+type metricsLabelConfig struct {
+	connectionKey  string
+	locationKey    string
+	statusKey      string
+	extendedKeys   []string
+	extendedValues []string
+}
+
+func defaultMetricsLabelConfig() metricsLabelConfig {
+	return metricsLabelConfig{
+		connectionKey:  "connection_id",
+		locationKey:    "location",
+		statusKey:      "status_code",
+		extendedKeys:   []string{},
+		extendedValues: []string{},
+	}
+}
+
+func (config *metricsLabelConfig) getConnectionKeys() []string {
+	return append([]string{config.connectionKey}, config.extendedKeys...)
+}
+func (config *metricsLabelConfig) getStatusKeys() []string {
+	return append([]string{config.connectionKey, config.statusKey}, config.extendedKeys...)
+}
+func (config *metricsLabelConfig) getLocationKeys() []string {
+	return append([]string{config.connectionKey, config.locationKey}, config.extendedKeys...)
+}
+
+func (config *metricsLabelConfig) getConnectionValues(connectionId string) []string {
+	return append([]string{connectionId}, config.extendedValues...)
+}
+func (config *metricsLabelConfig) getStatusValues(connectionId, status string) []string {
+	return append([]string{connectionId, status}, config.extendedValues...)
+}
+func (config *metricsLabelConfig) getLocationValues(connectionId, location string) []string {
+	return append([]string{connectionId, location}, config.extendedValues...)
+}
+
+func newMetricsLabelConfig(extendedLabels map[string]string) metricsLabelConfig {
+	config := defaultMetricsLabelConfig()
+	for key, value := range extendedLabels {
+		config.extendedKeys = append(config.extendedKeys, key)
+		config.extendedValues = append(config.extendedValues, value)
+	}
+	return config
+}
+
+func newMuxerMetrics(config *metricsLabelConfig) *muxerMetrics {
 	rtt := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rtt",
 			Help: "Round-trip time in millisecond",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(rtt)
 
@@ -69,7 +119,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "rtt_min",
 			Help: "Shortest round-trip time in millisecond",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(rttMin)
 
@@ -78,7 +128,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "rtt_max",
 			Help: "Longest round-trip time in millisecond",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(rttMax)
 
@@ -87,7 +137,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "receive_window_ave",
 			Help: "Average receive window size in bytes",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(receiveWindowAve)
 
@@ -96,7 +146,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "send_window_ave",
 			Help: "Average send window size in bytes",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(sendWindowAve)
 
@@ -105,7 +155,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "receive_window_min",
 			Help: "Smallest receive window size in bytes",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(receiveWindowMin)
 
@@ -114,7 +164,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "receive_window_max",
 			Help: "Largest receive window size in bytes",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(receiveWindowMax)
 
@@ -123,7 +173,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "send_window_min",
 			Help: "Smallest send window size in bytes",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(sendWindowMin)
 
@@ -132,7 +182,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "send_window_max",
 			Help: "Largest send window size in bytes",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(sendWindowMax)
 
@@ -141,7 +191,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "inbound_bytes_per_sec_curr",
 			Help: "Current inbounding bytes per second, 0 if there is no incoming connection",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(inBoundRateCurr)
 
@@ -150,7 +200,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "inbound_bytes_per_sec_min",
 			Help: "Minimum non-zero inbounding bytes per second",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(inBoundRateMin)
 
@@ -159,7 +209,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "inbound_bytes_per_sec_max",
 			Help: "Maximum inbounding bytes per second",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(inBoundRateMax)
 
@@ -168,7 +218,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "outbound_bytes_per_sec_curr",
 			Help: "Current outbounding bytes per second, 0 if there is no outgoing traffic",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(outBoundRateCurr)
 
@@ -177,7 +227,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "outbound_bytes_per_sec_min",
 			Help: "Minimum non-zero outbounding bytes per second",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(outBoundRateMin)
 
@@ -186,7 +236,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "outbound_bytes_per_sec_max",
 			Help: "Maximum outbounding bytes per second",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(outBoundRateMax)
 
@@ -195,7 +245,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "comp_bytes_before",
 			Help: "Bytes sent via cross-stream compression, pre compression",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(compBytesBefore)
 
@@ -204,7 +254,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "comp_bytes_after",
 			Help: "Bytes sent via cross-stream compression, post compression",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(compBytesAfter)
 
@@ -213,7 +263,7 @@ func newMuxerMetrics() *muxerMetrics {
 			Name: "comp_rate_ave",
 			Help: "Average outbound cross-stream compression ratio",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(compRateAve)
 
@@ -239,25 +289,25 @@ func newMuxerMetrics() *muxerMetrics {
 	}
 }
 
-func (m *muxerMetrics) update(connectionID string, metrics *h2mux.MuxerMetrics) {
-	m.rtt.WithLabelValues(connectionID).Set(convertRTTMilliSec(metrics.RTT))
-	m.rttMin.WithLabelValues(connectionID).Set(convertRTTMilliSec(metrics.RTTMin))
-	m.rttMax.WithLabelValues(connectionID).Set(convertRTTMilliSec(metrics.RTTMax))
-	m.receiveWindowAve.WithLabelValues(connectionID).Set(metrics.ReceiveWindowAve)
-	m.sendWindowAve.WithLabelValues(connectionID).Set(metrics.SendWindowAve)
-	m.receiveWindowMin.WithLabelValues(connectionID).Set(float64(metrics.ReceiveWindowMin))
-	m.receiveWindowMax.WithLabelValues(connectionID).Set(float64(metrics.ReceiveWindowMax))
-	m.sendWindowMin.WithLabelValues(connectionID).Set(float64(metrics.SendWindowMin))
-	m.sendWindowMax.WithLabelValues(connectionID).Set(float64(metrics.SendWindowMax))
-	m.inBoundRateCurr.WithLabelValues(connectionID).Set(float64(metrics.InBoundRateCurr))
-	m.inBoundRateMin.WithLabelValues(connectionID).Set(float64(metrics.InBoundRateMin))
-	m.inBoundRateMax.WithLabelValues(connectionID).Set(float64(metrics.InBoundRateMax))
-	m.outBoundRateCurr.WithLabelValues(connectionID).Set(float64(metrics.OutBoundRateCurr))
-	m.outBoundRateMin.WithLabelValues(connectionID).Set(float64(metrics.OutBoundRateMin))
-	m.outBoundRateMax.WithLabelValues(connectionID).Set(float64(metrics.OutBoundRateMax))
-	m.compBytesBefore.WithLabelValues(connectionID).Set(float64(metrics.CompBytesBefore.Value()))
-	m.compBytesAfter.WithLabelValues(connectionID).Set(float64(metrics.CompBytesAfter.Value()))
-	m.compRateAve.WithLabelValues(connectionID).Set(float64(metrics.CompRateAve()))
+func (m *muxerMetrics) update(connectionLabelValues []string, metrics *h2mux.MuxerMetrics) {
+	m.rtt.WithLabelValues(connectionLabelValues...).Set(convertRTTMilliSec(metrics.RTT))
+	m.rttMin.WithLabelValues(connectionLabelValues...).Set(convertRTTMilliSec(metrics.RTTMin))
+	m.rttMax.WithLabelValues(connectionLabelValues...).Set(convertRTTMilliSec(metrics.RTTMax))
+	m.receiveWindowAve.WithLabelValues(connectionLabelValues...).Set(metrics.ReceiveWindowAve)
+	m.sendWindowAve.WithLabelValues(connectionLabelValues...).Set(metrics.SendWindowAve)
+	m.receiveWindowMin.WithLabelValues(connectionLabelValues...).Set(float64(metrics.ReceiveWindowMin))
+	m.receiveWindowMax.WithLabelValues(connectionLabelValues...).Set(float64(metrics.ReceiveWindowMax))
+	m.sendWindowMin.WithLabelValues(connectionLabelValues...).Set(float64(metrics.SendWindowMin))
+	m.sendWindowMax.WithLabelValues(connectionLabelValues...).Set(float64(metrics.SendWindowMax))
+	m.inBoundRateCurr.WithLabelValues(connectionLabelValues...).Set(float64(metrics.InBoundRateCurr))
+	m.inBoundRateMin.WithLabelValues(connectionLabelValues...).Set(float64(metrics.InBoundRateMin))
+	m.inBoundRateMax.WithLabelValues(connectionLabelValues...).Set(float64(metrics.InBoundRateMax))
+	m.outBoundRateCurr.WithLabelValues(connectionLabelValues...).Set(float64(metrics.OutBoundRateCurr))
+	m.outBoundRateMin.WithLabelValues(connectionLabelValues...).Set(float64(metrics.OutBoundRateMin))
+	m.outBoundRateMax.WithLabelValues(connectionLabelValues...).Set(float64(metrics.OutBoundRateMax))
+	m.compBytesBefore.WithLabelValues(connectionLabelValues...).Set(float64(metrics.CompBytesBefore.Value()))
+	m.compBytesAfter.WithLabelValues(connectionLabelValues...).Set(float64(metrics.CompBytesAfter.Value()))
+	m.compRateAve.WithLabelValues(connectionLabelValues...).Set(float64(metrics.CompRateAve()))
 }
 
 func convertRTTMilliSec(t time.Duration) float64 {
@@ -266,6 +316,11 @@ func convertRTTMilliSec(t time.Duration) float64 {
 
 // Metrics that can be collected without asking the edge
 func NewTunnelMetrics() *TunnelMetrics {
+	config := defaultMetricsLabelConfig()
+	return NewTunnelMetricsFromConfig(config)
+}
+
+func NewTunnelMetricsFromConfig(config metricsLabelConfig) *TunnelMetrics {
 	haConnections := prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "ha_connections",
@@ -285,7 +340,7 @@ func NewTunnelMetrics() *TunnelMetrics {
 			Name: "requests_per_tunnel",
 			Help: "Amount of requests proxied through each tunnel",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(requestsPerTunnel)
 
@@ -294,7 +349,7 @@ func NewTunnelMetrics() *TunnelMetrics {
 			Name: "concurrent_requests_per_tunnel",
 			Help: "Concurrent requests proxied through each tunnel",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(concurrentRequestsPerTunnel)
 
@@ -303,7 +358,7 @@ func NewTunnelMetrics() *TunnelMetrics {
 			Name: "max_concurrent_requests_per_tunnel",
 			Help: "Largest number of concurrent requests proxied through each tunnel so far",
 		},
-		[]string{"connection_id"},
+		config.getConnectionKeys(),
 	)
 	prometheus.MustRegister(maxConcurrentRequestsPerTunnel)
 
@@ -319,7 +374,7 @@ func NewTunnelMetrics() *TunnelMetrics {
 			Name: "response_by_code",
 			Help: "Count of responses by HTTP status code",
 		},
-		[]string{"status_code"},
+		config.getStatusKeys(),
 	)
 	prometheus.MustRegister(responseByCode)
 
@@ -328,7 +383,7 @@ func NewTunnelMetrics() *TunnelMetrics {
 			Name: "response_code_per_tunnel",
 			Help: "Count of responses by HTTP status code fore each tunnel",
 		},
-		[]string{"connection_id", "status_code"},
+		config.getStatusKeys(),
 	)
 	prometheus.MustRegister(responseCodePerTunnel)
 
@@ -337,7 +392,7 @@ func NewTunnelMetrics() *TunnelMetrics {
 			Name: "server_locations",
 			Help: "Where each tunnel is connected to. 1 means current location, 0 means previous locations.",
 		},
-		[]string{"connection_id", "location"},
+		config.getLocationKeys(),
 	)
 	prometheus.MustRegister(serverLocations)
 
@@ -354,10 +409,12 @@ func NewTunnelMetrics() *TunnelMetrics {
 		responseCodePerTunnel:          responseCodePerTunnel,
 		serverLocations:                serverLocations,
 		oldServerLocations:             make(map[string]string),
-		muxerMetrics:                   newMuxerMetrics(),
+		muxerMetrics:                   newMuxerMetrics(&config),
+		labelConfig:                    config,
 	}
 }
 
+// XXX must add labels
 func (t *TunnelMetrics) incrementHaConnections() {
 	t.haConnections.Inc()
 }
@@ -367,7 +424,7 @@ func (t *TunnelMetrics) decrementHaConnections() {
 }
 
 func (t *TunnelMetrics) updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics) {
-	t.muxerMetrics.update(connectionID, metrics)
+	t.muxerMetrics.update(t.labelConfig.getConnectionValues(connectionID), metrics)
 }
 
 func (t *TunnelMetrics) incrementRequests(connectionID string) {
@@ -375,7 +432,7 @@ func (t *TunnelMetrics) incrementRequests(connectionID string) {
 	var concurrentRequests uint64
 	var ok bool
 	if concurrentRequests, ok = t.concurrentRequests[connectionID]; ok {
-		t.concurrentRequests[connectionID] += 1
+		t.concurrentRequests[connectionID]++
 		concurrentRequests++
 	} else {
 		t.concurrentRequests[connectionID] = 1
@@ -383,13 +440,13 @@ func (t *TunnelMetrics) incrementRequests(connectionID string) {
 	}
 	if maxConcurrentRequests, ok := t.maxConcurrentRequests[connectionID]; (ok && maxConcurrentRequests < concurrentRequests) || !ok {
 		t.maxConcurrentRequests[connectionID] = concurrentRequests
-		t.maxConcurrentRequestsPerTunnel.WithLabelValues(connectionID).Set(float64(concurrentRequests))
+		t.maxConcurrentRequestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Set(float64(concurrentRequests))
 	}
 	t.concurrentRequestsLock.Unlock()
 
 	t.totalRequests.Inc()
-	t.requestsPerTunnel.WithLabelValues(connectionID).Inc()
-	t.concurrentRequestsPerTunnel.WithLabelValues(connectionID).Inc()
+	t.requestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Inc()
+	t.concurrentRequestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Inc()
 }
 
 func (t *TunnelMetrics) decrementConcurrentRequests(connectionID string) {
@@ -399,12 +456,12 @@ func (t *TunnelMetrics) decrementConcurrentRequests(connectionID string) {
 	}
 	t.concurrentRequestsLock.Unlock()
 
-	t.concurrentRequestsPerTunnel.WithLabelValues(connectionID).Dec()
+	t.concurrentRequestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Dec()
 }
 
 func (t *TunnelMetrics) incrementResponses(connectionID, code string) {
-	t.responseByCode.WithLabelValues(code).Inc()
-	t.responseCodePerTunnel.WithLabelValues(connectionID, code).Inc()
+	t.responseByCode.WithLabelValues(t.labelConfig.getStatusValues(connectionID, code)...).Inc()
+	t.responseCodePerTunnel.WithLabelValues(t.labelConfig.getStatusValues(connectionID, code)...).Inc()
 
 }
 
@@ -414,8 +471,8 @@ func (t *TunnelMetrics) registerServerLocation(connectionID, loc string) {
 	if oldLoc, ok := t.oldServerLocations[connectionID]; ok && oldLoc == loc {
 		return
 	} else if ok {
-		t.serverLocations.WithLabelValues(connectionID, oldLoc).Dec()
+		t.serverLocations.WithLabelValues(t.labelConfig.getLocationValues(connectionID, oldLoc)...).Dec()
 	}
-	t.serverLocations.WithLabelValues(connectionID, loc).Inc()
+	t.serverLocations.WithLabelValues(t.labelConfig.getLocationValues(connectionID, loc)...).Inc()
 	t.oldServerLocations[connectionID] = loc
 }

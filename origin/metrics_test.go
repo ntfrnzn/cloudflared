@@ -8,8 +8,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var labels = map[string]string{
+	"test_id":  "j2x4xfMcLhD3WSBmJuvYzroGtBi0GaMG",
+	"hostname": "example.mydomain.com",
+}
+var labelConfig = newMetricsLabelConfig(labels)
+
 // can only be called once
-var m = NewTunnelMetrics()
+var m = NewTunnelMetricsFromConfig(labelConfig)
 
 func TestConcurrentRequestsSingleTunnel(t *testing.T) {
 	routines := 20
