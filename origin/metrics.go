@@ -104,7 +104,7 @@ func (config *metricsLabelConfig) getLocationValues(connectionID, location strin
 	return append([]string{connectionID, location}, config.extendedValues...)
 }
 
-func newMetricsLabelConfig(extendedLabels map[string]string) metricsLabelConfig {
+func NewMetricsLabelConfig(extendedLabels map[string]string) metricsLabelConfig {
 	config := defaultMetricsLabelConfig()
 	for key, value := range extendedLabels {
 		config.extendedKeys = append(config.extendedKeys, key)

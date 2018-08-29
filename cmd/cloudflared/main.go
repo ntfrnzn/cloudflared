@@ -502,7 +502,7 @@ func startServer(c *cli.Context, shutdownC, graceShutdownC chan struct{}) error 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		errC <- origin.StartTunnelDaemon(tunnelConfig, graceShutdownC, connectedSignal)
+		errC <- origin.StartTunnelDaemon(tunnelConfig, tunnelConfig.Metrics, graceShutdownC, connectedSignal)
 	}()
 
 	return waitToShutdown(&wg, errC, shutdownC, graceShutdownC, c.Duration("grace-period"))
