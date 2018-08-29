@@ -12,7 +12,7 @@ var labels = map[string]string{
 	"test_id":  "j2x4xfMcLhD3WSBmJuvYzroGtBi0GaMG",
 	"hostname": "example.mydomain.com",
 }
-var labelConfig = NewMetricsLabelConfig(labels)
+var labelConfig = newMetricsLabelConfig(labels)
 
 // can only be called once
 var m = NewTunnelMetricsFromConfig(labelConfig)

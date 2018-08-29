@@ -53,7 +53,7 @@ type TunnelMetrics struct {
 	oldServerLocations map[string]string
 
 	// labelConfig stores the set of extended key/value labels
-	labelConfig metricsLabelConfig
+	LabelConfig metricsLabelConfig
 
 	muxerMetrics *muxerMetrics
 }
@@ -76,11 +76,13 @@ func defaultMetricsLabelConfig() metricsLabelConfig {
 	}
 }
 
-func (config *metricsLabelConfig) setLabelValues(values []string) error {
-	if len(values) != len(config.extendedKeys) {
-		return errors.New("new set of label values doesn't match number of keys")
+// SetLabelValues overrides the preexisting metrics label value with the ones supplied here
+// No new keys are inserted, and un-set values will be set to the empty string
+func (config *metricsLabelConfig) SetLabelValues(valueMapping map[string]string) error {
+
+	for i, key := range config.extendedKeys {
+		config.extendedValues[i] = valueMapping[key]
 	}
-	config.extendedValues = values
 	return nil
 }
 
@@ -104,13 +106,14 @@ func (config *metricsLabelConfig) getLocationValues(connectionID, location strin
 	return append([]string{connectionID, location}, config.extendedValues...)
 }
 
-func NewMetricsLabelConfig(extendedLabels map[string]string) metricsLabelConfig {
-	config := defaultMetricsLabelConfig()
-	for key, value := range extendedLabels {
-		config.extendedKeys = append(config.extendedKeys, key)
-		config.extendedValues = append(config.extendedValues, value)
+func NewMetricsLabelConfig(extendedLabelKeys, extendedLabelValues []string) (metricsLabelConfig, error) {
+	if len(extendedLabelKeys) != len(extendedLabelValues) {
+		return metricsLabelConfig{}, errors.New("Mismatched cardinality of extended metrics labels")
 	}
-	return config
+	config := defaultMetricsLabelConfig()
+	config.extendedKeys = extendedLabelKeys
+	config.extendedValues = extendedLabelValues
+	return config, nil
 }
 
 func newMuxerMetrics(config *metricsLabelConfig) *muxerMetrics {
@@ -419,7 +422,7 @@ func NewTunnelMetricsFromConfig(config metricsLabelConfig) *TunnelMetrics {
 		serverLocations:                serverLocations,
 		oldServerLocations:             make(map[string]string),
 		muxerMetrics:                   newMuxerMetrics(&config),
-		labelConfig:                    config,
+		LabelConfig:                    config,
 	}
 }
 
@@ -434,9 +437,9 @@ type TunnelMetricsUpdater interface {
 	registerServerLocation(connectionID, loc string)
 }
 
-func (t *TunnelMetrics) setLabelValues(labelValues []string) error {
-	return t.labelConfig.setLabelValues(labelValues)
-}
+// func (t *TunnelMetrics) setLabelValues(labelValues []string) error {
+// 	return t.LabelConfig.setLabelValues(labelValues)
+// }
 
 // XXX must add labels
 func (t *TunnelMetrics) incrementHaConnections() {
@@ -448,7 +451,7 @@ func (t *TunnelMetrics) decrementHaConnections() {
 }
 
 func (t *TunnelMetrics) updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics) {
-	t.muxerMetrics.update(t.labelConfig.getConnectionValues(connectionID), metrics)
+	t.muxerMetrics.update(t.LabelConfig.getConnectionValues(connectionID), metrics)
 }
 
 func (t *TunnelMetrics) incrementRequests(connectionID string) {
@@ -464,13 +467,13 @@ func (t *TunnelMetrics) incrementRequests(connectionID string) {
 	}
 	if maxConcurrentRequests, ok := t.maxConcurrentRequests[connectionID]; (ok && maxConcurrentRequests < concurrentRequests) || !ok {
 		t.maxConcurrentRequests[connectionID] = concurrentRequests
-		t.maxConcurrentRequestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Set(float64(concurrentRequests))
+		t.maxConcurrentRequestsPerTunnel.WithLabelValues(t.LabelConfig.getConnectionValues(connectionID)...).Set(float64(concurrentRequests))
 	}
 	t.concurrentRequestsLock.Unlock()
 
 	t.totalRequests.Inc()
-	t.requestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Inc()
-	t.concurrentRequestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Inc()
+	t.requestsPerTunnel.WithLabelValues(t.LabelConfig.getConnectionValues(connectionID)...).Inc()
+	t.concurrentRequestsPerTunnel.WithLabelValues(t.LabelConfig.getConnectionValues(connectionID)...).Inc()
 }
 
 func (t *TunnelMetrics) decrementConcurrentRequests(connectionID string) {
@@ -480,12 +483,12 @@ func (t *TunnelMetrics) decrementConcurrentRequests(connectionID string) {
 	}
 	t.concurrentRequestsLock.Unlock()
 
-	t.concurrentRequestsPerTunnel.WithLabelValues(t.labelConfig.getConnectionValues(connectionID)...).Dec()
+	t.concurrentRequestsPerTunnel.WithLabelValues(t.LabelConfig.getConnectionValues(connectionID)...).Dec()
 }
 
 func (t *TunnelMetrics) incrementResponses(connectionID, code string) {
-	t.responseByCode.WithLabelValues(t.labelConfig.getStatusValues(connectionID, code)...).Inc()
-	t.responseCodePerTunnel.WithLabelValues(t.labelConfig.getStatusValues(connectionID, code)...).Inc()
+	t.responseByCode.WithLabelValues(t.LabelConfig.getStatusValues(connectionID, code)...).Inc()
+	t.responseCodePerTunnel.WithLabelValues(t.LabelConfig.getStatusValues(connectionID, code)...).Inc()
 
 }
 
@@ -495,8 +498,8 @@ func (t *TunnelMetrics) registerServerLocation(connectionID, loc string) {
 	if oldLoc, ok := t.oldServerLocations[connectionID]; ok && oldLoc == loc {
 		return
 	} else if ok {
-		t.serverLocations.WithLabelValues(t.labelConfig.getLocationValues(connectionID, oldLoc)...).Dec()
+		t.serverLocations.WithLabelValues(t.LabelConfig.getLocationValues(connectionID, oldLoc)...).Dec()
 	}
-	t.serverLocations.WithLabelValues(t.labelConfig.getLocationValues(connectionID, loc)...).Inc()
+	t.serverLocations.WithLabelValues(t.LabelConfig.getLocationValues(connectionID, loc)...).Inc()
 	t.oldServerLocations[connectionID] = loc
 }

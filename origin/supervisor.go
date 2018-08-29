@@ -155,7 +155,7 @@ func (s *Supervisor) initialize(ctx context.Context, connectedSignal chan struct
 // startTunnel starts the first tunnel connection. The resulting error will be sent on
 // s.tunnelErrors. It will send a signal via connectedSignal if registration succeed
 func (s *Supervisor) startFirstTunnel(ctx context.Context, connectedSignal chan struct{}) {
-	err := ServeTunnelLoop(ctx, s.config, s.config.Metrics, s.getEdgeIP(0), 0, connectedSignal)
+	err := ServeTunnelLoop(ctx, s.config, s.getEdgeIP(0), 0, connectedSignal)
 	defer func() {
 		s.tunnelErrors <- tunnelError{index: 0, err: err}
 	}()
@@ -176,14 +176,14 @@ func (s *Supervisor) startFirstTunnel(ctx context.Context, connectedSignal chan 
 		default:
 			return
 		}
-		err = ServeTunnelLoop(ctx, s.config, s.config.Metrics, s.getEdgeIP(0), 0, connectedSignal)
+		err = ServeTunnelLoop(ctx, s.config, s.getEdgeIP(0), 0, connectedSignal)
 	}
 }
 
 // startTunnel starts a new tunnel connection. The resulting error will be sent on
 // s.tunnelErrors.
 func (s *Supervisor) startTunnel(ctx context.Context, index int, connectedSignal chan struct{}) {
-	err := ServeTunnelLoop(ctx, s.config, s.config.Metrics, s.getEdgeIP(index), uint8(index), connectedSignal)
+	err := ServeTunnelLoop(ctx, s.config, s.getEdgeIP(index), uint8(index), connectedSignal)
 	s.tunnelErrors <- tunnelError{index: index, err: err}
 }
 
