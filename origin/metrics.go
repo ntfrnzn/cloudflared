@@ -1,7 +1,6 @@
 package origin
 
 import (
-	"sync"
 	"time"
 
 	"github.com/cloudflare/cloudflared/h2mux"
@@ -31,25 +30,13 @@ type muxerMetrics struct {
 }
 
 type TunnelMetrics struct {
-	haConnections     prometheus.Gauge
-	totalRequests     prometheus.Counter
-	requestsPerTunnel *prometheus.CounterVec
-	// concurrentRequestsLock is a mutex for concurrentRequests and maxConcurrentRequests
-	concurrentRequestsLock      sync.Mutex
-	concurrentRequestsPerTunnel *prometheus.GaugeVec
-	// concurrentRequests records count of concurrent requests for each tunnel
-	concurrentRequests             map[string]uint64
-	maxConcurrentRequestsPerTunnel *prometheus.GaugeVec
-	// concurrentRequests records max count of concurrent requests for each tunnel
-	maxConcurrentRequests map[string]uint64
+	haConnections         prometheus.Gauge
+	totalRequests         prometheus.Counter
+	requestsPerTunnel     *prometheus.CounterVec
 	timerRetries          prometheus.Gauge
 	responseByCode        *prometheus.CounterVec
 	responseCodePerTunnel *prometheus.CounterVec
 	serverLocations       *prometheus.GaugeVec
-	// locationLock is a mutex for oldServerLocations
-	locationLock sync.Mutex
-	// oldServerLocations stores the last server the tunnel was connected to
-	oldServerLocations map[string]string
 
 	muxerMetrics *muxerMetrics
 }
@@ -342,19 +329,14 @@ func NewTunnelMetrics() *TunnelMetrics {
 	prometheus.MustRegister(serverLocations)
 
 	return &TunnelMetrics{
-		haConnections:                  haConnections,
-		totalRequests:                  totalRequests,
-		requestsPerTunnel:              requestsPerTunnel,
-		concurrentRequestsPerTunnel:    concurrentRequestsPerTunnel,
-		concurrentRequests:             make(map[string]uint64),
-		maxConcurrentRequestsPerTunnel: maxConcurrentRequestsPerTunnel,
-		maxConcurrentRequests:          make(map[string]uint64),
-		timerRetries:                   timerRetries,
-		responseByCode:                 responseByCode,
-		responseCodePerTunnel:          responseCodePerTunnel,
-		serverLocations:                serverLocations,
-		oldServerLocations:             make(map[string]string),
-		muxerMetrics:                   newMuxerMetrics(),
+		haConnections:         haConnections,
+		totalRequests:         totalRequests,
+		requestsPerTunnel:     requestsPerTunnel,
+		timerRetries:          timerRetries,
+		responseByCode:        responseByCode,
+		responseCodePerTunnel: responseCodePerTunnel,
+		serverLocations:       serverLocations,
+		muxerMetrics:          newMuxerMetrics(),
 	}
 }
 
@@ -371,35 +353,12 @@ func (t *TunnelMetrics) updateMuxerMetrics(connectionID string, metrics *h2mux.M
 }
 
 func (t *TunnelMetrics) incrementRequests(connectionID string) {
-	t.concurrentRequestsLock.Lock()
-	var concurrentRequests uint64
-	var ok bool
-	if concurrentRequests, ok = t.concurrentRequests[connectionID]; ok {
-		t.concurrentRequests[connectionID] += 1
-		concurrentRequests++
-	} else {
-		t.concurrentRequests[connectionID] = 1
-		concurrentRequests = 1
-	}
-	if maxConcurrentRequests, ok := t.maxConcurrentRequests[connectionID]; (ok && maxConcurrentRequests < concurrentRequests) || !ok {
-		t.maxConcurrentRequests[connectionID] = concurrentRequests
-		t.maxConcurrentRequestsPerTunnel.WithLabelValues(connectionID).Set(float64(concurrentRequests))
-	}
-	t.concurrentRequestsLock.Unlock()
 
 	t.totalRequests.Inc()
 	t.requestsPerTunnel.WithLabelValues(connectionID).Inc()
-	t.concurrentRequestsPerTunnel.WithLabelValues(connectionID).Inc()
 }
 
 func (t *TunnelMetrics) decrementConcurrentRequests(connectionID string) {
-	t.concurrentRequestsLock.Lock()
-	if _, ok := t.concurrentRequests[connectionID]; ok {
-		t.concurrentRequests[connectionID] -= 1
-	}
-	t.concurrentRequestsLock.Unlock()
-
-	t.concurrentRequestsPerTunnel.WithLabelValues(connectionID).Dec()
 }
 
 func (t *TunnelMetrics) incrementResponses(connectionID, code string) {
@@ -408,14 +367,11 @@ func (t *TunnelMetrics) incrementResponses(connectionID, code string) {
 
 }
 
+// registerServerLocation should be renamed to countServerConnectionEvents or something like that
 func (t *TunnelMetrics) registerServerLocation(connectionID, loc string) {
-	t.locationLock.Lock()
-	defer t.locationLock.Unlock()
-	if oldLoc, ok := t.oldServerLocations[connectionID]; ok && oldLoc == loc {
-		return
-	} else if ok {
-		t.serverLocations.WithLabelValues(connectionID, oldLoc).Dec()
-	}
+	// don't bother with decrement, it's inappropriate to keep state in the
+	// metrics collector like this. We don't have the information to
+	// correctly derive the period that a tunnel is open to the location
+
 	t.serverLocations.WithLabelValues(connectionID, loc).Inc()
-	t.oldServerLocations[connectionID] = loc
 }
