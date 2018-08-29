@@ -124,7 +124,7 @@ func (c *TunnelConfig) RegistrationOptions(connectionID uint8, OriginLocalIP str
 	}
 }
 
-func StartTunnelDaemon(config *TunnelConfig, shutdownC <-chan struct{}, connectedSignal chan struct{}) error {
+func StartTunnelDaemon(config *TunnelConfig, metrics TunnelMetricsUpdater, shutdownC <-chan struct{}, connectedSignal chan struct{}) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		<-shutdownC
@@ -138,19 +138,20 @@ func StartTunnelDaemon(config *TunnelConfig, shutdownC <-chan struct{}, connecte
 		if err != nil {
 			return err
 		}
-		return ServeTunnelLoop(ctx, config, addrs[0], 0, connectedSignal)
+		return ServeTunnelLoop(ctx, config, metrics, addrs[0], 0, connectedSignal)
 	}
 }
 
 func ServeTunnelLoop(ctx context.Context,
 	config *TunnelConfig,
+	metrics TunnelMetricsUpdater,
 	addr *net.TCPAddr,
 	connectionID uint8,
 	connectedSignal chan struct{},
 ) error {
 	logger := config.Logger
-	config.Metrics.incrementHaConnections()
-	defer config.Metrics.decrementHaConnections()
+	metrics.incrementHaConnections()
+	defer metrics.decrementHaConnections()
 	backoff := BackoffHandler{MaxRetries: config.Retries}
 	// Used to close connectedSignal no more than once
 	connectedFuse := h2mux.NewBooleanFuse()
@@ -162,7 +163,7 @@ func ServeTunnelLoop(ctx context.Context,
 	// Ensure the above goroutine will terminate if we return without connecting
 	defer connectedFuse.Fuse(false)
 	for {
-		err, recoverable := ServeTunnel(ctx, config, addr, connectionID, connectedFuse, &backoff)
+		err, recoverable := ServeTunnel(ctx, config, metrics, addr, connectionID, connectedFuse, &backoff)
 		if recoverable {
 			if duration, ok := backoff.GetBackoffDuration(ctx); ok {
 				logger.Infof("Retrying in %s seconds", duration)
