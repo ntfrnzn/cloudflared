@@ -498,11 +498,14 @@ func startServer(c *cli.Context, shutdownC, graceShutdownC chan struct{}) error 
 	if err != nil {
 		return err
 	}
-
+	metrics, err := newMetricsUpdater(tunnelConfig)
+	if err != nil {
+		return err
+	}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		errC <- origin.StartTunnelDaemon(tunnelConfig, graceShutdownC, connectedSignal)
+		errC <- origin.StartTunnelDaemon(tunnelConfig, metrics, graceShutdownC, connectedSignal)
 	}()
 
 	return waitToShutdown(&wg, errC, shutdownC, graceShutdownC, c.Duration("grace-period"))

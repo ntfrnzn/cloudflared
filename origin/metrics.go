@@ -4,9 +4,42 @@ import (
 	"time"
 
 	"github.com/cloudflare/cloudflared/h2mux"
+	"github.com/pkg/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+type TunnelMetrics struct {
+	haConnections prometheus.Gauge
+	timerRetries  prometheus.Gauge
+
+	requests        *prometheus.CounterVec
+	responses       *prometheus.CounterVec
+	serverLocations *prometheus.GaugeVec
+
+	connectionKey string
+	locationKey   string
+	statusKey     string
+	commonKeys    []string
+
+	muxerMetrics *muxerMetrics
+}
+
+type tunnelMetricsUpdater struct {
+	metrics      *TunnelMetrics
+	commonValues []string
+	muxerUpdater *muxerMetricsUpdater
+}
+
+type TunnelMetricsUpdater interface {
+	incrementHaConnections()
+	decrementHaConnections()
+	updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics)
+	incrementRequests(connectionID string)
+	decrementConcurrentRequests(connectionID string)
+	incrementResponses(connectionID, code string)
+	registerServerLocation(connectionID, loc string)
+}
 
 type muxerMetrics struct {
 	rtt              *prometheus.GaugeVec
@@ -29,16 +62,8 @@ type muxerMetrics struct {
 	compRateAve      *prometheus.GaugeVec
 }
 
-type TunnelMetrics struct {
-	haConnections         prometheus.Gauge
-	totalRequests         prometheus.Counter
-	requestsPerTunnel     *prometheus.CounterVec
-	timerRetries          prometheus.Gauge
-	responseByCode        *prometheus.CounterVec
-	responseCodePerTunnel *prometheus.CounterVec
-	serverLocations       *prometheus.GaugeVec
-
-	muxerMetrics *muxerMetrics
+type muxerMetricsUpdater struct {
+	metrics *muxerMetrics
 }
 
 func newMuxerMetrics() *muxerMetrics {
@@ -251,48 +276,50 @@ func convertRTTMilliSec(t time.Duration) float64 {
 	return float64(t / time.Millisecond)
 }
 
+func NewTunnelMetricsUpdater(metrics *TunnelMetrics, commonLabelValues []string) (TunnelMetricsUpdater, error) {
+
+	if len(commonLabelValues) == len(metrics.commonKeys) {
+		return nil, errors.New("Mismatched count of metrics label key and values")
+	}
+
+	return &tunnelMetricsUpdater{
+		metrics:      metrics,
+		commonValues: commonLabelValues,
+	}, nil
+}
+
 // Metrics that can be collected without asking the edge
-func NewTunnelMetrics() *TunnelMetrics {
+func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
+
+	connectionKey := "connection_id"
+	locationKey := "location"
+	statusKey := "status"
+
 	haConnections := prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "ha_connections",
 			Help: "Number of active ha connections",
-		})
+		},
+	)
 	prometheus.MustRegister(haConnections)
 
-	totalRequests := prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "total_requests",
-			Help: "Amount of requests proxied through all the tunnels",
-		})
-	prometheus.MustRegister(totalRequests)
-
-	requestsPerTunnel := prometheus.NewCounterVec(
+	requests := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "requests_per_tunnel",
 			Help: "Amount of requests proxied through each tunnel",
 		},
-		[]string{"connection_id"},
+		append(commonLabelKeys, connectionKey),
 	)
-	prometheus.MustRegister(requestsPerTunnel)
+	prometheus.MustRegister(requests)
 
-	concurrentRequestsPerTunnel := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "concurrent_requests_per_tunnel",
-			Help: "Concurrent requests proxied through each tunnel",
+	responses := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "response_code_per_tunnel",
+			Help: "Count of responses by HTTP status code fore each tunnel",
 		},
-		[]string{"connection_id"},
+		[]string{"connection_id", "status_code"},
 	)
-	prometheus.MustRegister(concurrentRequestsPerTunnel)
-
-	maxConcurrentRequestsPerTunnel := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "max_concurrent_requests_per_tunnel",
-			Help: "Largest number of concurrent requests proxied through each tunnel so far",
-		},
-		[]string{"connection_id"},
-	)
-	prometheus.MustRegister(maxConcurrentRequestsPerTunnel)
+	prometheus.MustRegister(responses)
 
 	timerRetries := prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -301,77 +328,61 @@ func NewTunnelMetrics() *TunnelMetrics {
 		})
 	prometheus.MustRegister(timerRetries)
 
-	responseByCode := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "response_by_code",
-			Help: "Count of responses by HTTP status code",
-		},
-		[]string{"status_code"},
-	)
-	prometheus.MustRegister(responseByCode)
-
-	responseCodePerTunnel := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "response_code_per_tunnel",
-			Help: "Count of responses by HTTP status code fore each tunnel",
-		},
-		[]string{"connection_id", "status_code"},
-	)
-	prometheus.MustRegister(responseCodePerTunnel)
-
 	serverLocations := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "server_locations",
 			Help: "Where each tunnel is connected to. 1 means current location, 0 means previous locations.",
 		},
-		[]string{"connection_id", "location"},
+		append(commonLabelKeys, locationKey),
 	)
 	prometheus.MustRegister(serverLocations)
 
 	return &TunnelMetrics{
-		haConnections:         haConnections,
-		totalRequests:         totalRequests,
-		requestsPerTunnel:     requestsPerTunnel,
-		timerRetries:          timerRetries,
-		responseByCode:        responseByCode,
-		responseCodePerTunnel: responseCodePerTunnel,
-		serverLocations:       serverLocations,
-		muxerMetrics:          newMuxerMetrics(),
+		haConnections: haConnections,
+		timerRetries:  timerRetries,
+
+		requests:        requests,
+		responses:       responses,
+		serverLocations: serverLocations,
+
+		connectionKey: connectionKey,
+		locationKey:   locationKey,
+		statusKey:     statusKey,
+		commonKeys:    commonLabelKeys,
+
+		muxerMetrics: newMuxerMetrics(),
 	}
 }
 
-func (t *TunnelMetrics) incrementHaConnections() {
-	t.haConnections.Inc()
+func (t *tunnelMetricsUpdater) incrementHaConnections() {
+	t.metrics.haConnections.Inc()
 }
 
-func (t *TunnelMetrics) decrementHaConnections() {
-	t.haConnections.Dec()
+func (t *tunnelMetricsUpdater) decrementHaConnections() {
+	t.metrics.haConnections.Dec()
 }
 
-func (t *TunnelMetrics) updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics) {
-	t.muxerMetrics.update(connectionID, metrics)
+func (t *tunnelMetricsUpdater) updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics) {
+	// t.muxerUpdater.muxerMetrics.update(connectionID, metrics)
 }
 
-func (t *TunnelMetrics) incrementRequests(connectionID string) {
-
-	t.totalRequests.Inc()
-	t.requestsPerTunnel.WithLabelValues(connectionID).Inc()
+func (t *tunnelMetricsUpdater) incrementRequests(connectionID string) {
+	values := append(t.commonValues, connectionID)
+	t.metrics.requests.WithLabelValues(values...).Inc()
 }
 
-func (t *TunnelMetrics) decrementConcurrentRequests(connectionID string) {
+func (t *tunnelMetricsUpdater) decrementConcurrentRequests(connectionID string) {
 }
 
-func (t *TunnelMetrics) incrementResponses(connectionID, code string) {
-	t.responseByCode.WithLabelValues(code).Inc()
-	t.responseCodePerTunnel.WithLabelValues(connectionID, code).Inc()
+func (t *tunnelMetricsUpdater) incrementResponses(connectionID, code string) {
+	values := append(t.commonValues, connectionID, code)
 
+	t.metrics.responses.WithLabelValues(values...).Inc()
 }
 
 // registerServerLocation should be renamed to countServerConnectionEvents or something like that
-func (t *TunnelMetrics) registerServerLocation(connectionID, loc string) {
-	// don't bother with decrement, it's inappropriate to keep state in the
-	// metrics collector like this. We don't have the information to
-	// correctly derive the period that a tunnel is open to the location
+func (t *tunnelMetricsUpdater) registerServerLocation(connectionID, loc string) {
 
-	t.serverLocations.WithLabelValues(connectionID, loc).Inc()
+	values := append(t.commonValues, connectionID, loc)
+	t.metrics.serverLocations.WithLabelValues(values...).Inc()
 }
