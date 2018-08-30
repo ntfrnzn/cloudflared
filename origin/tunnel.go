@@ -389,7 +389,7 @@ func LogServerInfo(
 		return
 	}
 	logger.Infof("Connected to %s", serverInfo.LocationName)
-	metrics.registerServerLocation(uint8ToString(connectionID), serverInfo.LocationName)
+	metrics.setServerLocation(uint8ToString(connectionID), serverInfo.LocationName)
 }
 
 func H2RequestHeadersToH1Request(h2 []h2mux.Header, h1 *http.Request) error {

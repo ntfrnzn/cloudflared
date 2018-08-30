@@ -19,9 +19,8 @@ type TunnelMetrics struct {
 	haConnections prometheus.Gauge
 	timerRetries  prometheus.Gauge
 
-	requests        *prometheus.CounterVec
-	responses       *prometheus.CounterVec
-	serverLocations *prometheus.GaugeVec // XXX location should just be used as a label on other metrics
+	requests  *prometheus.CounterVec
+	responses *prometheus.CounterVec
 
 	rtt              *prometheus.GaugeVec
 	rttMin           *prometheus.GaugeVec
@@ -47,10 +46,14 @@ type TunnelMetrics struct {
 type TunnelMetricsUpdater interface {
 	incrementHaConnections()
 	decrementHaConnections()
+
 	incrementRequests(connectionID string)
-	decrementConcurrentRequests(connectionID string)
 	incrementResponses(connectionID, code string)
-	registerServerLocation(connectionID, loc string)
+
+	decrementConcurrentRequests(connectionID string)
+
+	setServerLocation(connectionID, loc string)
+
 	updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics)
 }
 
@@ -61,6 +64,9 @@ type tunnelMetricsUpdater struct {
 
 	// commonValues is group of label values that are set for this updater
 	commonValues []string
+
+	// serverLocations maps the connectionID to a server location string
+	serverLocations map[string]string
 }
 
 // NewTunnelMetricsUpdater creates a metrics updater with common label values
@@ -70,8 +76,9 @@ func NewTunnelMetricsUpdater(metrics *TunnelMetrics, commonLabelValues []string)
 		return nil, fmt.Errorf("failed to create updater, mismatched count of metrics label key (%v) and values (%v)", metrics.commonKeys, commonLabelValues)
 	}
 	return &tunnelMetricsUpdater{
-		metrics:      metrics,
-		commonValues: commonLabelValues,
+		metrics:         metrics,
+		commonValues:    commonLabelValues,
+		serverLocations: make(map[string]string, 1),
 	}, nil
 }
 
@@ -81,6 +88,8 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 	connectionKey := "connection_id"
 	locationKey := "location"
 	statusKey := "status"
+
+	labelKeys := append(commonLabelKeys, connectionKey, locationKey)
 
 	// not a labelled vector
 	haConnections := prometheus.NewGauge(
@@ -104,7 +113,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "requests",
 			Help: "Count of requests",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(requests)
 
@@ -113,25 +122,16 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "responses",
 			Help: "Count of responses",
 		},
-		append(commonLabelKeys, connectionKey, statusKey),
+		append(labelKeys, statusKey),
 	)
 	prometheus.MustRegister(responses)
-
-	serverLocations := prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Name: "server_locations",
-			Help: "Where each tunnel is connected to. 1 means current location, 0 means previous locations.",
-		},
-		append(commonLabelKeys, connectionKey, locationKey),
-	)
-	prometheus.MustRegister(serverLocations)
 
 	rtt := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "rtt",
 			Help: "Round-trip time in millisecond",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(rtt)
 
@@ -140,7 +140,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "rtt_min",
 			Help: "Shortest round-trip time in millisecond",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(rttMin)
 
@@ -149,7 +149,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "rtt_max",
 			Help: "Longest round-trip time in millisecond",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(rttMax)
 
@@ -158,7 +158,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "receive_window_ave",
 			Help: "Average receive window size in bytes",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(receiveWindowAve)
 
@@ -167,7 +167,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "send_window_ave",
 			Help: "Average send window size in bytes",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(sendWindowAve)
 
@@ -176,7 +176,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "receive_window_min",
 			Help: "Smallest receive window size in bytes",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(receiveWindowMin)
 
@@ -185,7 +185,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "receive_window_max",
 			Help: "Largest receive window size in bytes",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(receiveWindowMax)
 
@@ -194,7 +194,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "send_window_min",
 			Help: "Smallest send window size in bytes",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(sendWindowMin)
 
@@ -203,7 +203,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "send_window_max",
 			Help: "Largest send window size in bytes",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(sendWindowMax)
 
@@ -212,7 +212,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "inbound_bytes_per_sec_curr",
 			Help: "Current inbounding bytes per second, 0 if there is no incoming connection",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(inBoundRateCurr)
 
@@ -221,7 +221,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "inbound_bytes_per_sec_min",
 			Help: "Minimum non-zero inbounding bytes per second",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(inBoundRateMin)
 
@@ -230,7 +230,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "inbound_bytes_per_sec_max",
 			Help: "Maximum inbounding bytes per second",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(inBoundRateMax)
 
@@ -239,7 +239,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "outbound_bytes_per_sec_curr",
 			Help: "Current outbounding bytes per second, 0 if there is no outgoing traffic",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(outBoundRateCurr)
 
@@ -248,7 +248,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "outbound_bytes_per_sec_min",
 			Help: "Minimum non-zero outbounding bytes per second",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(outBoundRateMin)
 
@@ -257,7 +257,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "outbound_bytes_per_sec_max",
 			Help: "Maximum outbounding bytes per second",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(outBoundRateMax)
 
@@ -266,7 +266,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "comp_bytes_before",
 			Help: "Bytes sent via cross-stream compression, pre compression",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(compBytesBefore)
 
@@ -275,7 +275,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "comp_bytes_after",
 			Help: "Bytes sent via cross-stream compression, post compression",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(compBytesAfter)
 
@@ -284,7 +284,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "comp_rate_ave",
 			Help: "Average outbound cross-stream compression ratio",
 		},
-		append(commonLabelKeys, connectionKey),
+		labelKeys,
 	)
 	prometheus.MustRegister(compRateAve)
 
@@ -298,9 +298,8 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 		haConnections: haConnections,
 		timerRetries:  timerRetries,
 
-		requests:        requests,
-		responses:       responses,
-		serverLocations: serverLocations,
+		requests:  requests,
+		responses: responses,
 
 		rtt:              rtt,
 		rttMin:           rttMin,
@@ -334,7 +333,7 @@ func convertRTTMilliSec(t time.Duration) float64 {
 	return float64(t / time.Millisecond)
 }
 func (t *tunnelMetricsUpdater) updateMuxerMetrics(connectionID string, muxMetrics *h2mux.MuxerMetrics) {
-	values := append(t.commonValues, connectionID)
+	values := append(t.commonValues, connectionID, t.serverLocations[connectionID])
 
 	t.metrics.rtt.WithLabelValues(values...).Set(convertRTTMilliSec(muxMetrics.RTT))
 	t.metrics.rttMin.WithLabelValues(values...).Set(convertRTTMilliSec(muxMetrics.RTTMin))
@@ -357,7 +356,7 @@ func (t *tunnelMetricsUpdater) updateMuxerMetrics(connectionID string, muxMetric
 }
 
 func (t *tunnelMetricsUpdater) incrementRequests(connectionID string) {
-	values := append(t.commonValues, connectionID)
+	values := append(t.commonValues, connectionID, t.serverLocations[connectionID])
 	t.metrics.requests.WithLabelValues(values...).Inc()
 }
 
@@ -366,15 +365,11 @@ func (t *tunnelMetricsUpdater) decrementConcurrentRequests(connectionID string) 
 }
 
 func (t *tunnelMetricsUpdater) incrementResponses(connectionID, code string) {
-	values := append(t.commonValues, connectionID, code)
+	values := append(t.commonValues, connectionID, t.serverLocations[connectionID], code)
 
 	t.metrics.responses.WithLabelValues(values...).Inc()
 }
 
-// registerServerLocation should be renamed to countServerConnectionEvents or something like that
-func (t *tunnelMetricsUpdater) registerServerLocation(connectionID, loc string) {
-
-	values := append(t.commonValues, connectionID, loc)
-	// TODO
-	t.metrics.serverLocations.WithLabelValues(values...).Inc()
+func (t *tunnelMetricsUpdater) setServerLocation(connectionID, loc string) {
+	t.serverLocations[connectionID] = loc
 }
