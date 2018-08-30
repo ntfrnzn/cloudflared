@@ -43,16 +43,16 @@ type TunnelMetrics struct {
 }
 
 // TunnelMetricsUpdater separates the prometheus metrics and the update process
+// The updater can be initialized with some shared metrics labels, while other
+// labels (connectionID, status) are set when the metric is updated
 type TunnelMetricsUpdater interface {
+	setServerLocation(connectionID, loc string)
+
 	incrementHaConnections()
 	decrementHaConnections()
 
 	incrementRequests(connectionID string)
 	incrementResponses(connectionID, code string)
-
-	decrementConcurrentRequests(connectionID string)
-
-	setServerLocation(connectionID, loc string)
 
 	updateMuxerMetrics(connectionID string, metrics *h2mux.MuxerMetrics)
 }
@@ -358,10 +358,6 @@ func (t *tunnelMetricsUpdater) updateMuxerMetrics(connectionID string, muxMetric
 func (t *tunnelMetricsUpdater) incrementRequests(connectionID string) {
 	values := append(t.commonValues, connectionID, t.serverLocations[connectionID])
 	t.metrics.requests.WithLabelValues(values...).Inc()
-}
-
-func (t *tunnelMetricsUpdater) decrementConcurrentRequests(connectionID string) {
-	// TODO
 }
 
 func (t *tunnelMetricsUpdater) incrementResponses(connectionID, code string) {

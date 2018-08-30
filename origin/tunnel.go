@@ -567,7 +567,6 @@ func (h *TunnelHandler) ServeStream(stream *h2mux.MuxedStream) error {
 			h.logResponse(response, cfRay, lbProbe)
 		}
 	}
-	h.metrics.decrementConcurrentRequests(h.connectionID)
 	return nil
 }
 
