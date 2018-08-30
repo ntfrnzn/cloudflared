@@ -1,10 +1,10 @@
 package origin
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/cloudflare/cloudflared/h2mux"
-	"github.com/pkg/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -278,8 +278,8 @@ func convertRTTMilliSec(t time.Duration) float64 {
 
 func NewTunnelMetricsUpdater(metrics *TunnelMetrics, commonLabelValues []string) (TunnelMetricsUpdater, error) {
 
-	if len(commonLabelValues) == len(metrics.commonKeys) {
-		return nil, errors.New("Mismatched count of metrics label key and values")
+	if len(commonLabelValues) != len(metrics.commonKeys) {
+		return nil, fmt.Errorf("Mismatched count of metrics label key (%v) and values (%v)", metrics.commonKeys, commonLabelValues)
 	}
 
 	return &tunnelMetricsUpdater{
@@ -317,7 +317,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "response_code_per_tunnel",
 			Help: "Count of responses by HTTP status code fore each tunnel",
 		},
-		[]string{"connection_id", "status_code"},
+		append(commonLabelKeys, connectionKey, statusKey),
 	)
 	prometheus.MustRegister(responses)
 
@@ -333,7 +333,7 @@ func InitializeTunnelMetrics(commonLabelKeys []string) *TunnelMetrics {
 			Name: "server_locations",
 			Help: "Where each tunnel is connected to. 1 means current location, 0 means previous locations.",
 		},
-		append(commonLabelKeys, locationKey),
+		append(commonLabelKeys, connectionKey, locationKey),
 	)
 	prometheus.MustRegister(serverLocations)
 
@@ -384,5 +384,6 @@ func (t *tunnelMetricsUpdater) incrementResponses(connectionID, code string) {
 func (t *tunnelMetricsUpdater) registerServerLocation(connectionID, loc string) {
 
 	values := append(t.commonValues, connectionID, loc)
+
 	t.metrics.serverLocations.WithLabelValues(values...).Inc()
 }
