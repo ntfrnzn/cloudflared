@@ -527,15 +527,15 @@ func (h *TunnelHandler) ServeStream(stream *h2mux.MuxedStream) error {
 	h.logRequest(req, cfRay, lbProbe)
 	if websocket.IsWebSocketUpgrade(req) {
 		conn, response, err := websocket.ClientConnect(req, h.tlsConfig)
+		h.metrics.incrementResponses(h.connectionID, strconv.Itoa(response.StatusCode))
 		if err != nil {
-			h.logError(stream, err)
+			h.logError(stream, response, err)
 		} else {
 			stream.WriteHeaders(H1ResponseToH2Response(response))
 			defer conn.Close()
 			// Copy to/from stream to the undelying connection. Use the underlying
 			// connection because cloudflared doesn't operate on the message themselves
 			websocket.Stream(conn.UnderlyingConn(), stream)
-			h.metrics.incrementResponses(h.connectionID, "200")
 			h.logResponse(response, cfRay, lbProbe)
 		}
 	} else {
@@ -549,9 +549,10 @@ func (h *TunnelHandler) ServeStream(stream *h2mux.MuxedStream) error {
 		}
 
 		response, err := h.httpClient.RoundTrip(req)
+		h.metrics.incrementResponses(h.connectionID, strconv.Itoa(response.StatusCode))
 
 		if err != nil {
-			h.logError(stream, err)
+			h.logError(stream, response, err)
 		} else {
 			defer response.Body.Close()
 			stream.WriteHeaders(H1ResponseToH2Response(response))
@@ -563,7 +564,6 @@ func (h *TunnelHandler) ServeStream(stream *h2mux.MuxedStream) error {
 				io.CopyBuffer(stream, response.Body, make([]byte, 512*1024))
 			}
 
-			h.metrics.incrementResponses(h.connectionID, "200")
 			h.logResponse(response, cfRay, lbProbe)
 		}
 	}
@@ -590,11 +590,10 @@ func (h *TunnelHandler) isEventStream(response *http.Response) bool {
 	return false
 }
 
-func (h *TunnelHandler) logError(stream *h2mux.MuxedStream, err error) {
+func (h *TunnelHandler) logError(stream *h2mux.MuxedStream, response *http.Response, err error) {
 	h.logger.WithError(err).Error("HTTP request error")
-	stream.WriteHeaders([]h2mux.Header{{Name: ":status", Value: "502"}})
-	stream.Write([]byte("502 Bad Gateway"))
-	h.metrics.incrementResponses(h.connectionID, "502")
+	stream.WriteHeaders([]h2mux.Header{{Name: ":status", Value: strconv.Itoa(response.StatusCode)}})
+	stream.Write([]byte(response.Status))
 }
 
 func (h *TunnelHandler) logRequest(req *http.Request, cfRay string, lbProbe bool) {
