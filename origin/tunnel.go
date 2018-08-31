@@ -527,16 +527,16 @@ func (h *TunnelHandler) ServeStream(stream *h2mux.MuxedStream) error {
 	h.logRequest(req, cfRay, lbProbe)
 	if websocket.IsWebSocketUpgrade(req) {
 		conn, response, err := websocket.ClientConnect(req, h.tlsConfig)
-		h.metrics.incrementResponses(h.connectionID, strconv.Itoa(response.StatusCode))
 		if err != nil {
 			h.logError(stream, response, err)
 		} else {
-			stream.WriteHeaders(H1ResponseToH2Response(response))
 			defer conn.Close()
+			stream.WriteHeaders(H1ResponseToH2Response(response))
 			// Copy to/from stream to the undelying connection. Use the underlying
 			// connection because cloudflared doesn't operate on the message themselves
 			websocket.Stream(conn.UnderlyingConn(), stream)
 			h.logResponse(response, cfRay, lbProbe)
+			h.metrics.incrementResponses(h.connectionID, strconv.Itoa(response.StatusCode))
 		}
 	} else {
 		// Support for WSGI Servers by switching transfer encoding from chunked to gzip/deflate
@@ -549,7 +549,6 @@ func (h *TunnelHandler) ServeStream(stream *h2mux.MuxedStream) error {
 		}
 
 		response, err := h.httpClient.RoundTrip(req)
-		h.metrics.incrementResponses(h.connectionID, strconv.Itoa(response.StatusCode))
 
 		if err != nil {
 			h.logError(stream, response, err)
@@ -565,6 +564,7 @@ func (h *TunnelHandler) ServeStream(stream *h2mux.MuxedStream) error {
 			}
 
 			h.logResponse(response, cfRay, lbProbe)
+			h.metrics.incrementResponses(h.connectionID, strconv.Itoa(response.StatusCode))
 		}
 	}
 	return nil
